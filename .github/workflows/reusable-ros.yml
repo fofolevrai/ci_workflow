@@ -50,7 +50,8 @@ jobs:
         run: |
           set +e
           docker run --name ros_ci_runner "${CI_IMAGE}" bash -lc '
-            set -euo pipefail
+            # nounset stays off: ROS setup.bash reads unset vars (AMENT_TRACE_SETUP_FILES)
+            set -eo pipefail
             source /opt/ros/$ROS_DISTRO/setup.bash
             cd /workspace/ros2_bridge
             colcon build --symlink-install --event-handlers console_direct+
