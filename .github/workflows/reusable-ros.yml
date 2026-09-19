@@ -1,0 +1,86 @@
+name: reusable-ros
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        description: Path to the ros_bridge project root.
+        required: false
+        type: string
+        default: ros_bridge
+      ros-distro:
+        description: ROS 2 distribution used by the bridge image.
+        required: false
+        type: string
+        default: lyrical
+      require-docker-rebuild:
+        description: Rebuild Docker image as a required gate before tests.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  ros-colcon-test:
+    name: ros-colcon-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.project-path }}
+    env:
+      ROS_DISTRO: ${{ inputs.ros-distro }}
+      CI_IMAGE: ros-bridge-ci:${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rebuild Docker image (required gate for PR to master)
+        if: ${{ inputs.require-docker-rebuild }}
+        run: docker build --build-arg ROS_DISTRO=${ROS_DISTRO} -t "${CI_IMAGE}" -f Dockerfile .
+
+      - name: Build Docker image for push/runtime validation
+        if: ${{ !inputs.require-docker-rebuild }}
+        run: docker build --build-arg ROS_DISTRO=${ROS_DISTRO} -t "${CI_IMAGE}" -f Dockerfile .
+
+      - name: Run colcon build and test inside container
+        run: |
+          set +e
+          docker run --name ros_ci_runner "${CI_IMAGE}" bash -lc '
+            set -euo pipefail
+            source /opt/ros/$ROS_DISTRO/setup.bash
+            cd /workspace/ros2_bridge
+            colcon build --symlink-install --event-handlers console_direct+
+            colcon test --event-handlers console_direct+ --return-code-on-test-failure
+            colcon test-result --verbose
+          '
+          exit_code=$?
+
+          mkdir -p ros_ci_artifacts
+          docker cp ros_ci_runner:/workspace/ros2_bridge/log ros_ci_artifacts/log || true
+          docker cp ros_ci_runner:/workspace/ros2_bridge/build ros_ci_artifacts/build || true
+          docker cp ros_ci_runner:/workspace/ros2_bridge/install ros_ci_artifacts/install || true
+          docker rm -f ros_ci_runner >/dev/null 2>&1 || true
+
+          exit $exit_code
+
+      - name: Upload ROS test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ros-test-logs-${{ github.run_id }}
+          if-no-files-found: warn
+          path: ${{ inputs.project-path }}/ros_ci_artifacts/log
+
+      - name: Upload ROS build artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ros-build-tree-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            ${{ inputs.project-path }}/ros_ci_artifacts/build
+            ${{ inputs.project-path }}/ros_ci_artifacts/install

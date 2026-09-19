@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      firmware_changed: ${{ steps.filter.outputs.firmware }}
+      ros_changed: ${{ steps.filter.outputs.ros }}
+      ci_changed: ${{ steps.filter.outputs.ci }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed areas
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            firmware:
+              - color_sensing_poc/**
+            ros:
+              - ros_bridge/**
+            ci:
+              - .github/workflows/**
+
+  firmware-build:
+    name: firmware-build
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firmware_changed == 'true' || needs.detect-changes.outputs.ci_changed == 'true'
+    uses: ./.github/workflows/reusable-firmware.yml
+    with:
+      project-path: color_sensing_poc
+
+  ros-colcon-test:
+    name: ros-colcon-test
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ros_changed == 'true' || needs.detect-changes.outputs.ci_changed == 'true'
+    uses: ./.github/workflows/reusable-ros.yml
+    with:
+      project-path: ros_bridge
+      ros-distro: lyrical
+      require-docker-rebuild: ${{ github.event_name == 'pull_request' && github.base_ref == 'master' }}
