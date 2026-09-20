@@ -14,13 +14,19 @@ on:
         type: string
         default: lyrical
       require-docker-rebuild:
-        description: Rebuild Docker image as a required gate before tests.
+        description: Rebuild Docker image as a required gate before tests (PR/merge to master).
+        required: false
+        type: boolean
+        default: false
+      push-image:
+        description: Push the rebuilt image to GHCR as the latest cache for feature branches.
         required: false
         type: boolean
         default: false
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   ros-colcon-test:
@@ -38,13 +44,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Rebuild Docker image (required gate for PR to master)
+      - name: Set lowercase GHCR image name
+        run: echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/ros-bridge-ci" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rebuild Docker image (required gate for PR/merge to master)
         if: ${{ inputs.require-docker-rebuild }}
         run: docker build --build-arg ROS_DISTRO=${ROS_DISTRO} -t "${CI_IMAGE}" -f Dockerfile .
 
-      - name: Build Docker image for push/runtime validation
+      - name: Pull pre-built Docker image (feature branches)
         if: ${{ !inputs.require-docker-rebuild }}
-        run: docker build --build-arg ROS_DISTRO=${ROS_DISTRO} -t "${CI_IMAGE}" -f Dockerfile .
+        run: |
+          docker pull "${REGISTRY_IMAGE}:latest"
+          docker tag "${REGISTRY_IMAGE}:latest" "${CI_IMAGE}"
 
       - name: Run colcon build and test inside container
         run: |
@@ -67,6 +85,12 @@ jobs:
           docker rm -f ros_ci_runner >/dev/null 2>&1 || true
 
           exit $exit_code
+
+      - name: Push Docker image to GHCR (post-merge to master)
+        if: ${{ success() && inputs.push-image }}
+        run: |
+          docker tag "${CI_IMAGE}" "${REGISTRY_IMAGE}:latest"
+          docker push "${REGISTRY_IMAGE}:latest"
 
       - name: Upload ROS test logs
         if: always()

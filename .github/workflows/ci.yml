@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -54,4 +55,5 @@ jobs:
     with:
       project-path: ros_bridge
       ros-distro: lyrical
-      require-docker-rebuild: ${{ github.event_name == 'pull_request' && github.base_ref == 'master' }}
+      require-docker-rebuild: ${{ (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
+      push-image: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
