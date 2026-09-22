@@ -8,9 +8,30 @@ on:
         required: false
         type: string
         default: color_sensing_poc
+      dockerfile-path:
+        description: Path to the Dockerfile used to build the firmware CI image.
+        required: false
+        type: string
+        default: Dockerfile
+      image-name:
+        description: Image suffix used for local and GHCR firmware CI images.
+        required: false
+        type: string
+        default: firmware-ci
+      require-docker-rebuild:
+        description: Whether to require a Docker rebuild.
+        required: false
+        type: boolean
+        default: false
+      push-image:
+        description: Whether to push the Docker image.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   firmware-build:
@@ -20,11 +41,37 @@ jobs:
       run:
         shell: bash
         working-directory: ${{ inputs.project-path }}
+    env:
+      CI_IMAGE: ${{ inputs.image-name }}:${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
+      - name: Set lowercase GHCR image name
+        run: echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/${{ inputs.image-name }}" >> "$GITHUB_ENV"
+      
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Rebuild Docker image (required gate for PR/merge to master)
+        if: ${{ inputs.require-docker-rebuild }}
+        run: docker build -t "${CI_IMAGE}" -f "${{ inputs.dockerfile-path }}" .
+
+      - name: Pull pre-built Docker image (feature branches)
+        if: ${{ !inputs.require-docker-rebuild }}
+        run: |
+          if docker pull "${REGISTRY_IMAGE}:latest"; then
+            docker tag "${REGISTRY_IMAGE}:latest" "${CI_IMAGE}"
+          else
+            echo "No latest image found; rebuilding from Dockerfile."
+            docker build -t "${CI_IMAGE}" -f "${{ inputs.dockerfile-path }}" .
+          fi
+      
       - name: Install toolchain and build tools
         run: |
           sudo apt-get update
@@ -51,6 +98,12 @@ jobs:
         run: |
           test -f build/build/Debug/color_sensing_poc.elf
           test -f build/build/Release/color_sensing_poc.elf
+
+      - name: Push Docker image to GHCR (post-merge to master)
+        if: ${{ success() && inputs.push-image }}
+        run: |
+          docker tag "${CI_IMAGE}" "${REGISTRY_IMAGE}:latest"
+          docker push "${REGISTRY_IMAGE}:latest"
 
       - name: Upload firmware artifacts
         if: always()
