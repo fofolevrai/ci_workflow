@@ -28,6 +28,15 @@ on:
         required: false
         type: boolean
         default: false
+      python-requirements:
+        description: Code generator requirements file relative to project-path; skipped when absent.
+        required: false
+        type: string
+        default: third_party/msg_protocol/requirements.txt
+    secrets:
+      SUBMODULES_TOKEN:
+        description: Token with read access to private submodules (defaults to GITHUB_TOKEN).
+        required: false
 
 permissions:
   contents: read
@@ -47,6 +56,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
       
       - name: Set lowercase GHCR image name
         run: echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/${{ inputs.image-name }}" >> "$GITHUB_ENV"
@@ -81,6 +93,19 @@ jobs:
             gcc-arm-none-eabi \
             binutils-arm-none-eabi \
             libnewlib-arm-none-eabi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install code generator tools
+        run: |
+          if [[ -f "${{ inputs.python-requirements }}" ]]; then
+            python -m pip install -r "${{ inputs.python-requirements }}"
+          else
+            echo "No ${{ inputs.python-requirements }}; skipping."
+          fi
 
       - name: Configure Debug
         run: cmake --preset Debug -S build

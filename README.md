@@ -55,3 +55,7 @@ Notes:
 - Pin `@master` to a tagged release (e.g. `@v1.0.0`) or commit SHA for reproducible CI once this repo has releases.
 - The consumer repository must have the checked-out paths (`project-path`) matching its own folder layout.
 - `require-docker-rebuild: true` forces a fresh Docker image build as a required gate (typically for PRs into the default branch).
+- Both workflows check out submodules recursively. If a submodule (e.g. `msg_protocol`) is private,
+  pass a token with read access: `secrets: { SUBMODULES_TOKEN: ${{ secrets.SUBMODULES_TOKEN }} }`.
+- The firmware workflow installs `python-requirements` (default `third_party/msg_protocol/requirements.txt`)
+  so CMake can generate nanopb sources; the step is skipped when the file does not exist.
